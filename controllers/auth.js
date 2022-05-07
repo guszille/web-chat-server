@@ -1,6 +1,7 @@
 // Node Libs.
 import bcrypt from 'bcrypt'
 import express from 'express'
+import jsonwebtoken from 'jsonwebtoken'
 
 // Etc.
 import * as model from '../model.js'
@@ -34,7 +35,7 @@ router.post('/register', async (req, res) => {
 
         doc.name = req.body.userName.trim()
         doc.email = req.body.userEmail.trim()
-        doc.password = bcrypt.hashSync(req.body.userPassword, 8)
+        doc.password = await bcrypt.hash(req.body.userPassword, 10)
 
         const rep = await tab.insertOne(doc)
 
@@ -54,7 +55,7 @@ router.post('/register', async (req, res) => {
 })
 
 router.post('/login', async (req, res) => {
-    const gen = model.wrapperDBConnSwitcher()
+    const gen = await model.wrapperDBConnSwitcher()
     const tab = model.getDatabaseCollection('users')
     let doc = {}
     let err = ''
@@ -69,17 +70,19 @@ router.post('/login', async (req, res) => {
     } else if (!(doc = await tab.findOne({ email: req.body.userEmail })) || Object.keys(doc).length == 0) {
         err = '404 - User Does Not Exists'
 
-    } else if (!bcrypt.compareSync(userPassword, doc.password)) {
+    } else if (!(await bcrypt.compare(req.body.userPassword, doc.password))) {
         err = '401 - Incorrect Password'
     }
 
     // 2. Execute any database command.
     if (!err) {
-        // Continue...
+        const expiration = { expiresIn: '1h' }
+        const payload = { userId: doc._id.toString(), userEmail: doc.email }
+        const token = jsonwebtoken.sign(payload, process.env.JWT_SECRET, expiration)
 
         await gen.next() // Close database connection.
 
-        return res.status(200).json({ ok: true })
+        return res.status(200).json({ accessToken: token })
     }
 
     await gen.next() // Close database connection.
